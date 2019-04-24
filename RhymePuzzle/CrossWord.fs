@@ -25,13 +25,27 @@ module CrossWord =
             )
             (Some grid)
 
+    // lower the score the better the position
+    let scoreAxis value =
+        let center = gridSide / 2
+        center - value |> abs
+
+    let positionScore (x, y) =
+        scoreAxis x, scoreAxis y
+
+    let wordCenter word (x, y, slide) =
+        applyN (List.length word) slide (x, y)
+
     let addToGrid word grid =
         [
             for x in 1..gridSide do
             for y in 1..gridSide do
-            yield acceptWord grid word (fun (x, y) -> x, y + 1) (x, y)
-            yield acceptWord grid word (fun (x, y) -> x + 1, y) (x, y)
+            yield x, y, (fun (x, y) -> (x, y + 1))
+            yield x, y, (fun (x, y) -> (x + 1, y))
         ]
+        |> List.sortBy (wordCenter word >> (fun (x, y) -> x + y))
+        |> List.map (fun (x, y, slide) -> 
+            acceptWord grid word slide (x, y))
         |> List.filter Option.isSome
         |> function
         | head::_ -> head

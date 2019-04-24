@@ -74,20 +74,24 @@ module WordsApi =
 
     let getRhymeCandidates word =
         async {
-            let! rhymesResponse = get Rhymes word
+            try
+                let! rhymesResponse = get Rhymes word
             
-            let! rhymes =
-                rhymesResponse
-                |> RhymesResponseTypeProvider.Parse
-                |> fun res -> res.Rhymes.All |> Seq.toList
-                |> List.take 10
-                |> List.map (get Frequency)
-                |> Async.Parallel
+                let! rhymes =
+                    rhymesResponse
+                    |> RhymesResponseTypeProvider.Parse
+                    |> fun res -> res.Rhymes.All |> Seq.toList
+                    |> List.take 10
+                    |> List.map (get Frequency)
+                    |> Async.Parallel
 
-            return rhymes
-                |> Seq.toList
-                |> List.map FrequencyResponseTypeProvider.Parse
-                |> List.map (fun freq -> freq.Word)
+                return rhymes
+                    |> Seq.toList
+                    |> List.map FrequencyResponseTypeProvider.Parse
+                    |> List.map (fun freq -> freq.Word)
+                    |> Ok
+            with
+            | e -> return Error (e.ToString())
         }
 
     let sampleRhymes =

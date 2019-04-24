@@ -10,7 +10,7 @@ module App =
     type Model = string list
 
     type Msg = 
-        | WordApiResult of string list
+        | WordApiResult of Result<string list, string>
 
     let gridSide = 10
 
@@ -22,8 +22,10 @@ module App =
 
     let update msg model =
         match msg with
-        | WordApiResult words ->
+        | WordApiResult (Ok words) ->
             words, Cmd.none
+        | WordApiResult (Error error) ->
+            model, Cmd.none
 
     let view (model: Model) dispatch =
         let puzzleGrid = 
