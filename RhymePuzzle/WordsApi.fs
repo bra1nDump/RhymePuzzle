@@ -7,26 +7,6 @@ open Hopac
 open Infixes
 open FSharp.Data
 
-module Async =
-    
-    let lift f asyncComputation =
-        async {
-            let! x = asyncComputation
-            return f x
-        }
-
-module List =
-    
-    let bind f = List.map f >> List.concat
-    let xs (>>=) f = bind
-
-module String =
-
-    let toList str = 
-        let mutable charactersRev = []
-        String.iter (fun c -> charactersRev <- c::charactersRev) str
-        List.rev charactersRev
-
 module WordsApi =
 
     type RhymesResponseTypeProvider = 
@@ -97,5 +77,4 @@ module WordsApi =
     let sampleRhymes =
         RhymesResponseTypeProvider.GetSample().Rhymes.All
         |> Seq.toList
-        |> List.map String.toList
         

@@ -30,7 +30,7 @@ module App =
     let view (model: Model) dispatch =
         let puzzleGrid = 
             WordsApi.sampleRhymes
-            |> CrossWord.buildGrid
+            |> WordGrid.tryPlaceWords
         
         let label x y = 
             View.Label(

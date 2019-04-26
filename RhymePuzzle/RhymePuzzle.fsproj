@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Prelude.fs" />
     <Compile Include="WordsApi.fs" />
     <Compile Include="CrossWord.fs" />
     <Compile Include="App.fs" />
