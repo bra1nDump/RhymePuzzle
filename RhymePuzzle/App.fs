@@ -16,9 +16,10 @@ module App =
 
     let init () =
         []
-        , WordsApi.getRhymeCandidates "culture"
-        |> Async.map WordApiResult
-        |> Cmd.ofAsyncMsg 
+        , Cmd.none
+        //, WordsApi.getRhymeCandidates "culture"
+        //|> Async.map WordApiResult
+        //|> Cmd.ofAsyncMsg 
 
     let update msg model =
         match msg with
@@ -28,16 +29,15 @@ module App =
             model, Cmd.none
 
     let view (model: Model) dispatch =
-        let puzzleGrid = 
+        let grid = 
             WordsApi.sampleRhymes
             |> WordGrid.tryPlaceWords
         
-        let label x y = 
-            View.Label(
-                match Map.tryFind (x, y) puzzleGrid.Value with 
-                | Some letter -> Char.ToString letter
-                | None -> " "
-            )
+        let label point = 
+            match Option.bind (WordGrid.at point) grid with
+            | None -> " "
+            | Some char -> Char.ToString char
+            |> fun text -> View.Label(text)
         
         View.ContentPage(
         View.Grid(
@@ -46,8 +46,8 @@ module App =
             , children = [
                 for x in 1..gridSide do
                 for y in 1..gridSide do
-                    yield (label x y)
-                        .GridRow(x).GridColumn(y)
+                yield (label (x,y))
+                    .GridRow(x).GridColumn(y)
             ]
         ))
 

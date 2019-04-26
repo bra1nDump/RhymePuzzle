@@ -1,160 +1,132 @@
 ﻿namespace RhymePuzzle
 
 module Option =
-    let any<'a> (xs: 'a option list): 'a option = 
-        xs
-        |> List.fold (fun xs ->
-            function 
-            | Some x -> x::xs
-            | None -> xs)
-            []
-        |> List.rev
-        |> List.tryHead
+    let first<'a, 'state> 
+        (f: 'a -> 'state -> 'state option) 
+        (init: 'state) 
+        (xs: 'a list)
+        : 'state option = 
+        List.fold (fun state x ->
+            match state with
+            | Some state -> Some state
+            | None -> f x init)
+            None
+            xs
+
+    // create a fold with optional function that mutates the state but
+    // once it fails the entire computation fails
+    let all<'a, 'b> (f: 'b -> 'a -> 'b option) (init: 'b) (xs: 'a list): 'b option =
+        List.fold 
+            (fun maybeState x -> 
+                maybeState
+                |> Option.bind (fun state -> f state x))
+            (Some init)
+            xs
 
 module WordGrid =
+    type Word = char list
+    type Point = int * int
     type Orientation = 
         | Horizontal
         | Vertical
 
-    type WordPosition =
-        | Start
-        | End
-        | Middle
-
-    type Point = int * int
-
-    type PlacedWord =
-        {
-            Word: char list
+    type PlacedWord = {
+            Word: Word
             Position: Point
             Orientation: Orientation
         }
 
-    type Letter =
-        {
-            Letter: char
-            WordOrientation: Orientation
-            WordPosition: WordPosition
-        }
+    type Grid = PlacedWord list
 
-    type PlacedLetter = Point * Letter
-
-    let next orientation (x, y) =
+    let move orientation (x, y) n =
         match orientation with 
-        | Horizontal -> x, y + 1
-        | Vertical -> x + 1, y
+        | Horizontal -> x, y + n
+        | Vertical -> x + n, y
 
-    let previous orientation (x, y) =
-        match orientation with 
-        | Horizontal -> x, y - 1
-        | Vertical -> x - 1, y
+    let flip = function
+        | Horizontal -> Vertical
+        | Vertical -> Horizontal
     
     let gridSize = 10
 
     let wordToPlacedWordList word =
         let wordSize = List.length word
         [
-            for x in 1..gridSize - wordSize do
-            for y in 1..gridSize do
-            yield x, y, Horizontal
-
             for x in 1..gridSize do
-            for y in 1..gridSize - wordSize do
-            yield x, y, Vertical
+            for y in 1..(gridSize - wordSize + 1) do
+            yield { Word = word; Position = x, y; Orientation = Horizontal }
         ]
-        |> List.map (fun (x, y, orientation) ->
-            { Word = word; Position = x, y; Orientation = orientation })
+        @
+        [
+            for x in 1..(gridSize - wordSize + 1) do
+            for y in 1..gridSize do
+            yield { Word = word; Position = x, y; Orientation = Vertical }
+        ]
+        |> List.sortBy (fun word -> word.Position)
+        
+    let wordAreaList { Word = word; Position = start; Orientation = orientation } =
+        List.init (List.length word) (move orientation start)
 
-    let placedWordToPlacedLetterList 
-        { Word = word; Position = position; Orientation = orientation }
-        : PlacedLetter list =
-        List.mapFoldi (fun index position letter -> 
-            let wordPosition =
-                match index with 
-                | 0 -> Start
-                | _ when List.length word = index + 1 -> End
-                | _ -> Middle
-            let letter = { 
-                Letter = letter
-                WordOrientation = orientation
-                WordPosition = wordPosition }
-            (position, letter), next orientation position)
-            position
-            word
-        |> fst
+    let wordArea = wordAreaList >> Set.ofList
 
-    let flip = function
-        | Horizontal -> Vertical
-        | Vertical -> Horizontal
+    let letterAt position word =
+        List.zip
+            (wordAreaList word)
+            word.Word
+        |> Map.ofList
+        |> Map.tryFind position
+        
+    let area1 word =
+        let area = wordArea word |> Set.toList
+        let mutations = 
+            [ 
+                fun x -> x + 1
+                fun x -> x - 1
+                id
+            ]
+        let (<*>) = List.apply
 
-    let maybePlaceLetter ((position, letter): PlacedLetter) grid =
-        let isEmptyOrMatchingCheck = 
-            match Map.tryFind position grid with
-            | Some { Letter = foundLetter; WordOrientation = orientation } when 
-                foundLetter <> letter.Letter
-                || orientation = letter.WordOrientation -> false
-            | _ -> true
+        [ fun first second (x,y) -> first x, second y ]
+        <*> mutations
+        <*> mutations
+        <*> area
+        |> Set.ofList
 
-        let isEmpty position = Map.containsKey position grid |> not
-        let startEndCheck = 
-            match letter.WordPosition with 
-            | Start ->
-                previous letter.WordOrientation position
-                |> isEmpty
-            | End -> 
-                next letter.WordOrientation position
-                |> isEmpty
-            | Middle -> true
+    let acceptWordPair candidate fixedWord =
+        let fixedWordArea = wordArea fixedWord
+        if candidate.Orientation = fixedWord.Orientation then
+            Set.intersect 
+                fixedWordArea
+                (area1 candidate)
+            |> Set.isEmpty
+        else
+            match Set.intersect
+                    fixedWordArea
+                    (area1 candidate)
+                |> Set.toList with
+            | [] -> true
+            | overlaps ->
+                overlaps 
+                |> List.map
+                    (fun overlap ->
+                        let char1 = letterAt overlap candidate
+                        let char2 = letterAt overlap fixedWord
+                        char1 = char2
+                        && char1.IsSome)
+                |> List.any
 
-        let isEmptyOrDifferentOrientation position orientation =
-            match Map.tryFind position grid with
-            | None -> true 
-            | Some { WordOrientation = foundOrientation } 
-                when foundOrientation <> orientation -> true
-            | _ -> false
-        let perpendicularCheck =
-            let flippedOrientation = flip letter.WordOrientation
-            let previous = previous flippedOrientation position
-            let next = next flippedOrientation position
-
-            let previousEmptyOrNotEnd = 
-                match Map.tryFind previous grid with
-                | Some { WordPosition = End } -> false
-                | _ -> true
-
-            let nextEmptyOrNotStart =
-                match Map.tryFind next grid with
-                | Some { WordPosition = Start } -> false
-                | _ -> true
-
-            isEmptyOrDifferentOrientation previous letter.WordOrientation
-            && isEmptyOrDifferentOrientation next letter.WordOrientation
-            && previousEmptyOrNotEnd
-            && nextEmptyOrNotStart
-
-        if isEmptyOrMatchingCheck
-            && startEndCheck
-            && perpendicularCheck
-        then Map.add position letter grid |> Some
+    let tryPlaceWord word placedWords =
+        if List.forall (acceptWordPair word) placedWords
+        then word::placedWords |> Some
         else None
 
-    let placeWord word grid = 
-        word
-        |> placedWordToPlacedLetterList
-        |> List.fold 
-            (fun grid letter -> 
-                Option.bind (maybePlaceLetter letter) grid)
-            (Some grid)
+    let tryWord (grid: PlacedWord list): char list -> PlacedWord list option =
+        wordToPlacedWordList
+        >> Option.first tryPlaceWord grid
 
-    let tryPlaceWord word grid =
-        wordToPlacedWordList word
-        |> List.map (fun word -> placeWord word grid)
-        |> Option.any
-
-    let tryPlaceWords: string list -> Map<Point, char> option =
+    let tryPlaceWords: string list -> PlacedWord list option =
         List.map String.toList
-        >> List.fold
-            (fun maybeGrid word -> 
-                Option.bind (tryPlaceWord word) maybeGrid)
-            (Some Map.empty)
-        >> Option.map (Map.map (fun _ { Letter = letter } -> letter))
+        >> Option.all tryWord []
+
+    let at position = List.tryPick (letterAt position)
+        

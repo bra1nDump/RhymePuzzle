@@ -18,10 +18,7 @@ module WordsApi =
                     "abbreviate",
                     "abdicate",
                     "abirritate",
-                    "abietate",
-                    "ablate",
-                    "ablegate",
-                    "abnegate"
+                    "ablate"
                 ]
              }
         }
