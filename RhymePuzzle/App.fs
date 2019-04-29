@@ -5,51 +5,59 @@ open Fabulous.Core
 open Fabulous.DynamicViews
 open Xamarin.Forms
 open System
+open WordGrid
 
 module App = 
-    type Model = string list
+    type Model = PlacedWord list
 
     type Msg = 
         | WordApiResult of Result<string list, string>
-
-    let gridSide = 10
+        | LetterButtonPressed of (int * int)
 
     let init () =
         []
-        , Cmd.none
-        //, WordsApi.getRhymeCandidates "culture"
-        //|> Async.map WordApiResult
-        //|> Cmd.ofAsyncMsg 
+        , WordsApi.getRhymeCandidates (decimal 2, decimal 7) "sex"
+        |> Async.map WordApiResult
+        |> Cmd.ofAsyncMsg 
 
     let update msg model =
         match msg with
         | WordApiResult (Ok words) ->
-            words, Cmd.none
-        | WordApiResult (Error error) ->
+             List.scan (fun acc word -> word::acc) [] words
+            |> List.rev
+            |> List.pick WordGrid.tryPlaceWords
+            , Cmd.none
+        | WordApiResult (Error _) ->
+            model, Cmd.none
+        | LetterButtonPressed coordinate ->
             model, Cmd.none
 
     let view (model: Model) dispatch =
-        let grid = 
-            WordsApi.sampleRhymes
-            |> WordGrid.tryPlaceWords
+        let button point = 
+            match WordGrid.at point model with
+            | None -> View.Label(text = " ")
+            | Some char -> 
+                View.Button(
+                    text = Char.ToString char
+                    , command = (fun _ -> LetterButtonPressed point |> dispatch))
+                |> ignore
+                View.Label(Char.ToString char)
         
-        let label point = 
-            match Option.bind (WordGrid.at point) grid with
-            | None -> " "
-            | Some char -> Char.ToString char
-            |> fun text -> View.Label(text)
-        
+        let gridSide = WordGrid.gridSize
         View.ContentPage(
-        View.Grid(
-            rowdefs = [ for _ in 1..gridSide do yield "auto" ]
-            , coldefs = [ for _ in 1..gridSide do yield "auto" ]
-            , children = [
-                for x in 1..gridSide do
-                for y in 1..gridSide do
-                yield (label (x,y))
-                    .GridRow(x).GridColumn(y)
-            ]
-        ))
+            View.Grid(
+                rowdefs = [ for _ in 1..gridSide do yield "*" ]
+                , coldefs = [ for _ in 1..gridSide do yield "*" ]
+                , rowSpacing = 5.0
+                , columnSpacing = 5.0
+                , backgroundColor = Color.Aquamarine
+                , children = [
+                    for x in 1..gridSide do
+                    for y in 1..gridSide do
+                    yield (button (x,y))
+                        .GridRow(x).GridColumn(y)
+                ]
+            ))
 
     // Note, this declaration is needed if you enable LiveUpdate
     let program = Program.mkProgram init update view

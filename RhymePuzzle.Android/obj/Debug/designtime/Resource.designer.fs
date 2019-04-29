@@ -23,10 +23,10 @@ namespace RhymePuzzle.Android
     #nowarn "51" // address-of operator can occur in the code
     #nowarn "1183" // unused 'this' reference
     
-    exception ReturnExceptionb8945f26d1c14c088d2d4cf259f0ce25 of obj
-    exception ReturnNoneExceptionb8945f26d1c14c088d2d4cf259f0ce25
+    exception ReturnExceptiond90016dcbe304696ad62322985ce6c36 of obj
+    exception ReturnNoneExceptiond90016dcbe304696ad62322985ce6c36
     [<AutoOpen>]
-    module FuncConvertFinalOverloadb8945f26d1c14c088d2d4cf259f0ce25 =
+    module FuncConvertFinalOverloadd90016dcbe304696ad62322985ce6c36 =
       // This extension member adds to the FuncConvert type and is the last resort member in the method overloading rules. 
       type global.Microsoft.FSharp.Core.FuncConvert with
           /// A utility function to convert function values from tupled to curried form

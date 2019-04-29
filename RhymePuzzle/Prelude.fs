@@ -8,6 +8,30 @@ module Async =
             return f x
         }
 
+module Option =
+    let first<'a, 'state> 
+        (f: 'a -> 'state -> 'state option) 
+        (init: 'state) 
+        (xs: 'a list)
+        : 'state option = 
+        List.fold (fun state x ->
+            match state with
+            | Some state -> Some state
+            | None -> f x init)
+            None
+            xs
+
+    // create a fold with optional function that mutates the state but
+    // once it fails the entire computation fails
+    let all<'a, 'b> (f: 'b -> 'a -> 'b option) (init: 'b) (xs: 'a list): 'b option =
+        List.fold 
+            (fun maybeState x -> 
+                maybeState
+                |> Option.bind (fun state -> f state x))
+            (Some init)
+            xs
+
+
 module String =
     let toList str =
         let mutable characters = []

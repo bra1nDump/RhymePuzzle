@@ -1,28 +1,5 @@
 ﻿namespace RhymePuzzle
 
-module Option =
-    let first<'a, 'state> 
-        (f: 'a -> 'state -> 'state option) 
-        (init: 'state) 
-        (xs: 'a list)
-        : 'state option = 
-        List.fold (fun state x ->
-            match state with
-            | Some state -> Some state
-            | None -> f x init)
-            None
-            xs
-
-    // create a fold with optional function that mutates the state but
-    // once it fails the entire computation fails
-    let all<'a, 'b> (f: 'b -> 'a -> 'b option) (init: 'b) (xs: 'a list): 'b option =
-        List.fold 
-            (fun maybeState x -> 
-                maybeState
-                |> Option.bind (fun state -> f state x))
-            (Some init)
-            xs
-
 module WordGrid =
     type Word = char list
     type Point = int * int
@@ -47,22 +24,30 @@ module WordGrid =
         | Horizontal -> Vertical
         | Vertical -> Horizontal
     
-    let gridSize = 10
+    let gridSize = 15
+    let gridCenter = gridSize / 2, gridSize / 2
 
     let wordToPlacedWordList word =
+        let placedWordAndScore point orientation =
+            let (-) (x1,y1) (x2, y2) = x1 - x2, y1 - y2
+            let abs (x, y) = (abs x, abs y)
+            let wordCenter = move orientation point (List.length word / 2)
+            { Word = word; Position = point; Orientation = orientation }
+            , gridCenter - wordCenter |> abs
         let wordSize = List.length word
         [
             for x in 1..gridSize do
             for y in 1..(gridSize - wordSize + 1) do
-            yield { Word = word; Position = x, y; Orientation = Horizontal }
+            yield placedWordAndScore (x, y) Horizontal
         ]
         @
         [
             for x in 1..(gridSize - wordSize + 1) do
             for y in 1..gridSize do
-            yield { Word = word; Position = x, y; Orientation = Vertical }
+            yield placedWordAndScore (x, y) Vertical
         ]
-        |> List.sortBy (fun word -> word.Position)
+        |> List.sortBy snd
+        |> List.map fst
         
     let wordAreaList { Word = word; Position = start; Orientation = orientation } =
         List.init (List.length word) (move orientation start)
@@ -120,7 +105,7 @@ module WordGrid =
         then word::placedWords |> Some
         else None
 
-    let tryWord (grid: PlacedWord list): char list -> PlacedWord list option =
+    let tryWord (grid: PlacedWord list): Word -> PlacedWord list option =
         wordToPlacedWordList
         >> Option.first tryPlaceWord grid
 

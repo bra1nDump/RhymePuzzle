@@ -18,7 +18,11 @@ module WordsApi =
                     "abbreviate",
                     "abdicate",
                     "abirritate",
-                    "ablate"
+                    "ablate",
+                    "escalate",
+                    "procrastinate",
+                    "terminate",
+                    "create"
                 ]
              }
         }
@@ -49,7 +53,7 @@ module WordsApi =
         >>= readBodyAsString
         |> Job.toAsync
 
-    let getRhymeCandidates word =
+    let getRhymeCandidates (minZipf, maxZipf) word =
         async {
             try
                 let! rhymesResponse = get Rhymes word
@@ -65,6 +69,14 @@ module WordsApi =
                 return rhymes
                     |> Seq.toList
                     |> List.map FrequencyResponseTypeProvider.Parse
+                    |> List.filter (fun freq -> 
+                        try
+                            let zipf = freq.Frequency.Zipf
+                            minZipf < zipf
+                            && zipf < maxZipf
+                        with
+                        | _ -> false
+                        )
                     |> List.map (fun freq -> freq.Word)
                     |> Ok
             with
