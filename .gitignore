@@ -1,4 +1,4 @@
-**/obj/*
-**/bin/*
-packages
+**/obj/
+**/bin/
+packages/
 .vs
