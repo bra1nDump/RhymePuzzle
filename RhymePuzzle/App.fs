@@ -7,23 +7,29 @@ open Xamarin.Forms
 open System
 open WordGrid
 
+open DataMuseApi
+
 module App = 
     type Model = PlacedWord list
 
     type Msg = 
-        | WordApiResult of Result<string list, string>
+        | WordApiResult of Result<WordsResponse, string>
         | LetterButtonPressed of (int * int)
 
     let init () =
         []
-        , WordsApi.getRhymeCandidates (decimal 2, decimal 7) "sex"
+        , DataMuseApi.rhymes "sex"
         |> Async.map WordApiResult
         |> Cmd.ofAsyncMsg 
 
     let update msg model =
         match msg with
         | WordApiResult (Ok words) ->
-             List.scan (fun acc word -> word::acc) [] words
+            let wordList =
+                words
+                |> Array.map (fun word -> word.Word)
+                |> Array.toList
+            List.scan (fun acc word -> word::acc) [] wordList
             |> List.rev
             |> List.pick WordGrid.tryPlaceWords
             , Cmd.none
@@ -39,18 +45,23 @@ module App =
             | Some char -> 
                 View.Button(
                     text = Char.ToString char
+                    , heightRequest = double 40
+                    , widthRequest = double 40
+                    , fontSize = 9
+                    , textColor = Color.Black
+                    , cornerRadius = 2
+                    , borderColor = Color.DarkCyan
+                    , horizontalOptions = LayoutOptions.Fill
+                    , verticalOptions = LayoutOptions.Fill
                     , command = (fun _ -> LetterButtonPressed point |> dispatch))
-                |> ignore
-                View.Label(Char.ToString char)
         
         let gridSide = WordGrid.gridSize
         View.ContentPage(
             View.Grid(
                 rowdefs = [ for _ in 1..gridSide do yield "*" ]
                 , coldefs = [ for _ in 1..gridSide do yield "*" ]
-                , rowSpacing = 5.0
-                , columnSpacing = 5.0
-                , backgroundColor = Color.Aquamarine
+                //, rowSpacing = 2.0
+                //, columnSpacing = 2.0
                 , children = [
                     for x in 1..gridSide do
                     for y in 1..gridSide do

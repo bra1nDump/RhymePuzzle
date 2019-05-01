@@ -7,7 +7,7 @@
 
   <ItemGroup>
     <Compile Include="Prelude.fs" />
-    <Compile Include="WordsApi.fs" />
+    <Compile Include="DataMuseApi.fs" />
     <Compile Include="CrossWord.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>

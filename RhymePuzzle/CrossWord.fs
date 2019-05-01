@@ -24,7 +24,7 @@ module WordGrid =
         | Horizontal -> Vertical
         | Vertical -> Horizontal
     
-    let gridSize = 15
+    let gridSize = 12
     let gridCenter = gridSize / 2, gridSize / 2
 
     let wordToPlacedWordList word =
