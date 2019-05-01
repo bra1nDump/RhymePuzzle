@@ -114,4 +114,10 @@ module WordGrid =
         >> Option.all tryWord []
 
     let at position = List.tryPick (letterAt position)
+
+    let wordAt position = 
+        List.map (fun word -> letterAt position word, word)
+        >> List.filter (fst >> Option.isSome)
+        >> List.map snd
+        >> List.tryHead
         
