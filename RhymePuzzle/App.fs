@@ -16,17 +16,22 @@ module App =
     type Model = {
             Grid: (PlacedWord * PlacedWord) list
             EditingAt: int option
+            EditingWordEntryRef: ViewRef<Entry>
         }
 
     type Msg = 
         | WordApiResult of Result<WordsResponse, string>
+        | DefinitionButtonPressed of PlacedWord
         | LetterButtonPressed of (int * int)
         | EditingWordEntryUpdated of TextChangedEventArgs
+        | EditingWordEntrySizeChanged
+        | EditingWordEntryUnfocused
 
     let init () =
         {
             Grid = []
             EditingAt = None
+            EditingWordEntryRef = ViewRef<Entry>()
         }
         , DataMuseApi.rhymes "sex"
         |> Async.map WordApiResult
@@ -44,14 +49,32 @@ module App =
                 |> List.rev
                 |> List.pick WordGrid.tryPlaceWords
                 |> List.map (fun placedWord -> placedWord, { placedWord with Word = [] })
-            { Grid = grid; EditingAt = None }
+            { model with Grid = grid; EditingAt = None }
             , Cmd.none
         | WordApiResult (Error _) ->
             model, Cmd.none
         | LetterButtonPressed coordinate ->
             let hiddenWords = List.map fst model.Grid
             let wordClicked = (wordAt coordinate hiddenWords).Value
-            { model with EditingAt = (Some (List.findIndex (fun x -> x = wordClicked) hiddenWords)) }, Cmd.none
+            let wordIndex = List.findIndex (fun x -> x = wordClicked) hiddenWords
+            let newGrid = 
+                List.mapi 
+                    (fun index (h, a) -> 
+                        if index = wordIndex
+                        then h, { a with Word = [] }
+                        else h, a)
+                    model.Grid
+            { model with EditingAt = Some wordIndex; Grid = newGrid }
+            , Cmd.none
+        | EditingWordEntrySizeChanged ->
+            Option.iter 
+                (fun (entry: Entry) -> 
+                    entry.Focus() |> ignore
+                )
+                model.EditingWordEntryRef.TryValue
+            model, Cmd.none
+        | EditingWordEntryUnfocused ->
+            { model with EditingAt = None }, Cmd.none
         | EditingWordEntryUpdated args ->
             let word =
                 args.NewTextValue
@@ -69,6 +92,7 @@ module App =
     let view (model: Model) dispatch =
         let hidden = List.map fst model.Grid
         let displayed = List.map snd model.Grid
+
         let button point = 
             match WordGrid.at point hidden, WordGrid.at point displayed with
             | Some correct, Some attempted -> 
@@ -86,43 +110,82 @@ module App =
                     , borderColor = Color.DarkGray
                     , borderWidth = double 1
                     , command = (fun _ -> LetterButtonPressed point |> dispatch))
-            | _ -> View.Label(text = " ")
-        
+            | _ ->
+                match (WordGrid.wordAt (move Horizontal point 1) hidden, wordAt (move Vertical point 1) hidden) with
+                | Some word, _ -> Some word
+                | _, Some word -> Some word
+                | _ -> None
+                |> function
+                    | Some word when word.Position = (move Horizontal point 1) || word.Position = (move Vertical point 1) ->
+                        View.Button(
+                            text = "?"
+                            , command = (fun _ -> DefinitionButtonPressed word |> dispatch)
+                            , padding = Thickness(0.0))
+                    | _ -> View.Label()
+
         let gridSide = WordGrid.gridSize
-        View.ContentPage(
-            View.StackLayout(
-                [
-                    yield View.RelativeLayout(
-                        [
-                            yield View.Grid(
-                                rowdefs = [ for _ in 1..gridSide do yield "*" ]
-                                , coldefs = [ for _ in 1..gridSide do yield "*" ]
-                                , rowSpacing = 2.0
-                                , columnSpacing = 2.0
-                                , children = [
-                                    for x in 1..gridSide do
-                                    for y in 1..gridSide do
-                                    yield (button (x,y))
-                                        .GridRow(x).GridColumn(y)
-                                ]
+        let invisibleEntry =
+            Option.map 
+                (fun position ->
+                    let currentWord = 
+                        List.item position model.Grid |> snd
+                        |> fun word -> word.Word
+                        |> List.map Char.ToString
+                        |> String.concat ""
+                    View.Entry(
+                        text = currentWord
+                        , textChanged = (EditingWordEntryUpdated >> dispatch)
+                        , sizeChanged = (fun _ -> EditingWordEntrySizeChanged |> dispatch)
+                        , unfocused = (fun _ -> EditingWordEntryUnfocused |> dispatch)
+                        , ref = model.EditingWordEntryRef
+                    )
+                        .YConstraint(Constraint.RelativeToParent
+                            (fun parent -> 
+                                let (x, _) = List.item position model.Grid |> fst |> fun word -> 
+                                    move word.Orientation word.Position (List.length word.Word - 1)
+                                let cellSize = parent.Width / float gridSide
+                                let yOffset = cellSize * float (x - 1)
+                                yOffset
                             )
-                                .WidthConstraint(Constraint.RelativeToParent(fun parent -> parent.Width))
-                                .HeightConstraint(Constraint.RelativeToParent(fun parent -> parent.Width))
-                        ])
-                                       
-                    match model.EditingAt with
-                    | None -> ()
-                    | Some position ->
-                        let currentWord = 
-                            List.item position model.Grid |> snd
-                            |> fun word -> word.Word
-                            |> List.map Char.ToString
-                            |> String.concat ""
-                        yield View.Entry(text = currentWord, textChanged = (EditingWordEntryUpdated >> dispatch))
-                            .YConstraint(Constraint.RelativeToParent(fun parent -> parent.Height))
-                            .Height(50.0)
-                            .WidthConstraint(Constraint.RelativeToParent(fun parent -> parent.Width))
-                ]))
+                        )
+                        .XConstraint(Constraint.Constant(0.0))
+                        .WidthConstraint(Constraint.Constant(100.0))
+                        .HeightConstraint(Constraint.Constant(100.0))
+                )
+                model.EditingAt
+
+        View.ContentPage(
+            View.ScrollView(
+                View.StackLayout(
+                    [
+                        yield View.RelativeLayout(
+                            [
+                                match invisibleEntry with
+                                | Some entry -> yield entry
+                                | None -> ()
+
+                                yield View.Grid(
+                                    rowdefs = [ for _ in 1..gridSide do yield "*" ]
+                                    , coldefs = [ for _ in 1..gridSide do yield "*" ]
+                                    , children = [
+                                        for x in 1..gridSide do
+                                        for y in 1..gridSide do
+                                        yield (button (x,y))
+                                            .GridRow(x).GridColumn(y)
+                                    ]
+                                    , rowSpacing = 2.0
+                                    , columnSpacing = 2.0
+                                    , backgroundColor = Color.Blue
+                                )
+                                    .WidthConstraint(Constraint.RelativeToParent(fun parent -> parent.Width))
+                                    .HeightConstraint(Constraint.RelativeToParent(fun parent -> parent.Width))
+                            ]
+                        )
+                    ]
+                    , verticalOptions = LayoutOptions.Start
+                )
+            )
+        )
 
     // Note, this declaration is needed if you enable LiveUpdate
     let program = Program.mkProgram init update view
