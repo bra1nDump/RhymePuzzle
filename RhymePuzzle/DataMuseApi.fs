@@ -36,6 +36,7 @@ module DataMuseApi =
         """>
 
     type WordsResponse = WordsResponseTypeProvider.Root array
+    type Word = WordsResponseTypeProvider.Root
 
     let withTry = flip Job.tryWith
 

@@ -33,11 +33,17 @@ module Option =
 
 
 module String =
+    open System
+
     let toList str =
         let mutable characters = []
         String.iter (fun c -> characters <- c::characters) str
         
         List.rev characters
+
+    let fromCharList =
+        List.map Char.ToString
+        >> String.concat ""
 
 module List =
     // (a -> b list) -> a list -> b list

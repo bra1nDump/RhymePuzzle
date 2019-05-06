@@ -14,9 +14,12 @@ module App =
     open Hopac.Extensions.Seq
 
     type Model = {
+            Words: WordsResponse
             Grid: (PlacedWord * PlacedWord) list
             EditingAt: int option
             EditingWordEntryRef: ViewRef<Entry>
+
+            WordHelp: Word option
         }
 
     type Msg = 
@@ -26,12 +29,16 @@ module App =
         | EditingWordEntryUpdated of TextChangedEventArgs
         | EditingWordEntrySizeChanged
         | EditingWordEntryUnfocused
+        | DismissHelpPressed
 
     let init () =
         {
+            Words = [||]
             Grid = []
             EditingAt = None
             EditingWordEntryRef = ViewRef<Entry>()
+
+            WordHelp = None
         }
         , DataMuseApi.rhymes "sex"
         |> Async.map WordApiResult
@@ -49,7 +56,7 @@ module App =
                 |> List.rev
                 |> List.pick WordGrid.tryPlaceWords
                 |> List.map (fun placedWord -> placedWord, { placedWord with Word = [] })
-            { model with Grid = grid; EditingAt = None }
+            { model with Grid = grid; EditingAt = None; Words = words }
             , Cmd.none
         | WordApiResult (Error _) ->
             model, Cmd.none
@@ -88,8 +95,26 @@ module App =
                     )
                     model.Grid
             { model with Grid = grid }, Cmd.none
+        | DefinitionButtonPressed { Word = word } -> 
+            let rhyme = Array.tryFind (fun (w: Word) -> w.Word = String.fromCharList word) model.Words
+            { model with WordHelp = rhyme }, Cmd.none
+        | DismissHelpPressed -> 
+            { model with WordHelp = None }, Cmd.none
 
-    let view (model: Model) dispatch =
+    let viewHelp (word: Word) dispatch =
+        View.ContentPage(
+            View.ScrollView(
+                View.StackLayout(
+                    [
+                        yield View.Button(text = "Close", command = (fun _ -> DismissHelpPressed |> dispatch))
+                        for def in word.Defs do
+                        yield View.Label(def)
+                    ]
+                )
+            )
+        )
+
+    let viewGrid (model: Model) dispatch =
         let hidden = List.map fst model.Grid
         let displayed = List.map snd model.Grid
 
@@ -112,8 +137,8 @@ module App =
                     , command = (fun _ -> LetterButtonPressed point |> dispatch))
             | _ ->
                 match (WordGrid.wordAt (move Horizontal point 1) hidden, wordAt (move Vertical point 1) hidden) with
-                | Some word, _ -> Some word
-                | _, Some word -> Some word
+                | Some word, _ when word.Orientation = Horizontal -> Some word
+                | _, Some word when word.Orientation = Vertical -> Some word
                 | _ -> None
                 |> function
                     | Some word when word.Position = (move Horizontal point 1) || word.Position = (move Vertical point 1) ->
@@ -186,6 +211,10 @@ module App =
                 )
             )
         )
+
+    let view = function
+        | { WordHelp = Some help } -> viewHelp help
+        | model -> viewGrid model
 
     // Note, this declaration is needed if you enable LiveUpdate
     let program = Program.mkProgram init update view
