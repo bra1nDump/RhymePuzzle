@@ -53,4 +53,6 @@ module DataMuseApi =
         >>- Ok
         |> withTry (exnToString >> Error >> Job.result)
         |> Job.toAsync
+        |> fun x _ -> x
+        |> (flip Async.bind) (Async.SwitchToThreadPool())
         

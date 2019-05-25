@@ -61,3 +61,14 @@ module List =
         List.mapi (fun i x -> i, x)
         >> List.mapFold (fun state (i, x) -> step i state x) init
 
+    let takeMax k xs =
+        if List.length xs <= k
+        then xs
+        else List.take k xs
+
+    let rec zipWithNone xs ys =
+        match xs, ys with
+        | x::xs, y::ys -> (Some x, Some y)::zipWithNone xs ys
+        | x::xs, [] -> (Some x, None)::zipWithNone xs []
+        | [], y::ys -> (None, Some y)::zipWithNone [] ys
+        | _ -> []

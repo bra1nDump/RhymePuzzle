@@ -9,44 +9,122 @@ open WordGrid
 
 open DataMuseApi
 
+[<AutoOpen>]
+module Theme =
+
+    // green
+    let primaryButtonColor = Color.FromHex("06A291")
+    // blue
+    let focusColor = Color.FromHex("00A7E1")
+    let darkBlue = Color.FromHex("003459")
+    // red
+    let errorColor = Color.FromHex("CC0000")
+    let borderColor = Color.FromHex("33312E")
+    let textColor = Color.FromHex("00171F")
+
+    let clear = Color(0.0, 0.0, 0.0, 0.0)
+
+    // theme
+    let primaryHeight = 50
+    let png name = ImageSource.FromResource("RhymePuzzle." + name + ".png")
+
+    let snoopaLoompa = png "snoopaLoompa"
+    let leftIcon = png "leftIcon"
+    let rightIcon = png "rightIcon"
+    let closeIcon = png "closeIcon"
+
+    let screen = Device.Info.ScaledScreenSize
+
+    let imageButton image command =
+        View.AbsoluteLayout(
+            [
+                View.Image(image)
+                    .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                    .LayoutBounds(Rectangle(0.5, 0.5, float primaryHeight * 0.6, float primaryHeight * 0.6))
+            ]
+            , gestureRecognizers =
+                [ View.TapGestureRecognizer(command) ]
+        )
+
 module App = 
-    open Xamarin.Forms
-    open Hopac.Extensions.Seq
+    open Xamarin.Forms.PlatformConfiguration
 
-    type Model = {
-            Words: WordsResponse
-            Grid: (PlacedWord * PlacedWord) list
-            EditingAt: int option
+    type CrossWordModel = {
+            BaseWord: string
+            Words: (PlacedWord * DataMuseApi.Word) list
+            Letters: Map<Point, char>
+
+            CurrentWordIndex: int option
+            HintIndex: int option
+
             EditingWordEntryRef: ViewRef<Entry>
-
-            WordHelp: Word option
         }
+
+    type Model =
+        | BaselineRhymeWordModel of string
+        | LoadingCrosswordModel of string
+        | CrossWordModel of CrossWordModel
 
     type Msg = 
+        | BaselineRhymeUpdated of string
+        | BaselineRhymeSelected
+
+        | SnoopaLoompaImageCreated
         | WordApiResult of Result<WordsResponse, string>
-        | DefinitionButtonPressed of PlacedWord
+
         | LetterButtonPressed of (int * int)
-        | EditingWordEntryUpdated of TextChangedEventArgs
+
+        | NextHintButtonPressed
+        | EditingWordEntryUpdated of string
         | EditingWordEntrySizeChanged
-        | EditingWordEntryUnfocused
-        | DismissHelpPressed
+        | CloseWordView
 
-    let init () =
+    let init () = BaselineRhymeWordModel "", Cmd.none
+
+    let initCrossWordModel baseWord words =
         {
-            Words = [||]
-            Grid = []
-            EditingAt = None
-            EditingWordEntryRef = ViewRef<Entry>()
+            BaseWord = baseWord
+            Words = words
+            Letters = Map.empty
 
-            WordHelp = None
+            CurrentWordIndex = None
+            HintIndex = None
+
+            EditingWordEntryRef = ViewRef<Entry>()
         }
-        , DataMuseApi.rhymes "sex"
-        |> Async.map WordApiResult
-        |> Cmd.ofAsyncMsg 
+
+    let snoopaLoompaImageRef = ViewRef<Image>()
 
     let update msg model =
-        match msg with
-        | WordApiResult (Ok words) ->
+        match msg, model with
+        | BaselineRhymeUpdated word, _ ->
+            BaselineRhymeWordModel word, Cmd.none
+        | BaselineRhymeSelected, BaselineRhymeWordModel word ->
+            LoadingCrosswordModel word
+            ,
+            DataMuseApi.rhymes word
+            |> Async.map WordApiResult
+            |> Cmd.ofAsyncMsg
+        | SnoopaLoompaImageCreated, _ ->
+            snoopaLoompaImageRef.Value.RotateTo(360.0, uint32 4000, Easing.CubicInOut)
+            |> Async.AwaitTask
+            |> Async.bind (fun _ -> 
+                    snoopaLoompaImageRef.TryValue
+                    |> Option.iter (fun image -> image.RotateTo(360.0, uint32 4000, Easing.CubicInOut) |> ignore)
+                        
+                    Async.result ()
+                )
+            |> Async.StartImmediate
+
+            model
+            , Cmd.none
+        | WordApiResult (Ok words), LoadingCrosswordModel baseWord ->
+            let words = 
+                words
+                |> Array.filter 
+                    (fun (word: DataMuseApi.Word) -> 
+                        Array.isEmpty word.Defs |> not
+                    )
             let wordList =
                 words
                 |> Array.map (fun word -> word.Word)
@@ -55,166 +133,279 @@ module App =
                 List.scan (fun acc word -> word::acc) [] wordList
                 |> List.rev
                 |> List.pick WordGrid.tryPlaceWords
-                |> List.map (fun placedWord -> placedWord, { placedWord with Word = [] })
-            { model with Grid = grid; EditingAt = None; Words = words }
+                |> List.map (fun placedWord -> 
+                    placedWord
+                    , 
+                    Array.find 
+                        (fun (word: Word) -> String.toList word.Word = placedWord.Word) 
+                        words
+                )
+
+            initCrossWordModel baseWord grid |> CrossWordModel
             , Cmd.none
-        | WordApiResult (Error _) ->
-            model, Cmd.none
-        | LetterButtonPressed coordinate ->
-            let hiddenWords = List.map fst model.Grid
+        | WordApiResult (Error _), _ ->
+            BaselineRhymeWordModel "", Cmd.none
+        | LetterButtonPressed coordinate, CrossWordModel model ->
+            let hiddenWords = List.map fst model.Words
             let wordClicked = (wordAt coordinate hiddenWords).Value
             let wordIndex = List.findIndex (fun x -> x = wordClicked) hiddenWords
-            let newGrid = 
-                List.mapi 
-                    (fun index (h, a) -> 
-                        if index = wordIndex
-                        then h, { a with Word = [] }
-                        else h, a)
-                    model.Grid
-            { model with EditingAt = Some wordIndex; Grid = newGrid }
+            
+            { model with CurrentWordIndex = Some wordIndex; HintIndex = Some 0 } |> CrossWordModel
             , Cmd.none
-        | EditingWordEntrySizeChanged ->
+        | EditingWordEntrySizeChanged, CrossWordModel model ->
             Option.iter 
                 (fun (entry: Entry) -> 
                     entry.Focus() |> ignore
+                    let currentWord = 
+                        List.item model.CurrentWordIndex.Value model.Words |> snd
+                        |> fun word -> word.Word
+                    entry.CursorPosition <- String.length currentWord
                 )
                 model.EditingWordEntryRef.TryValue
-            model, Cmd.none
-        | EditingWordEntryUnfocused ->
-            { model with EditingAt = None }, Cmd.none
-        | EditingWordEntryUpdated args ->
-            let word =
-                args.NewTextValue
+            CrossWordModel model, Cmd.none
+        | CloseWordView, CrossWordModel model ->
+            { model with CurrentWordIndex = None; HintIndex = None } |> CrossWordModel
+            , Cmd.none
+        | EditingWordEntryUpdated text, CrossWordModel model  ->
+            let word = List.item model.CurrentWordIndex.Value model.Words |> fst
+            let area = WordGrid.wordAreaList word
+
+            let wordLength = List.length word.Word
+            let wordEntered =
+                text
                 |> String.toList
-            let grid =
-                List.mapi 
-                    (fun index (correct, attempt) ->
-                        if index <> model.EditingAt.Value
-                        then (correct, attempt)
-                        else (correct, { attempt with Word = word })
-                    )
-                    model.Grid
-            { model with Grid = grid }, Cmd.none
-        | DefinitionButtonPressed { Word = word } -> 
-            let rhyme = Array.tryFind (fun (w: Word) -> w.Word = String.fromCharList word) model.Words
-            { model with WordHelp = rhyme }, Cmd.none
-        | DismissHelpPressed -> 
-            { model with WordHelp = None }, Cmd.none
+                |> List.takeMax wordLength
+                |> List.map Some
 
-    let viewHelp (word: Word) dispatch =
+            model.EditingWordEntryRef.Value.Text 
+                <- text.Substring(0, wordEntered.Length)
+                
+            let wordEntered = 
+                wordEntered 
+                @ List.init (wordLength - wordEntered.Length) (fun _ -> None)
+
+            let letters = 
+                List.zip area wordEntered
+                |> List.fold (fun map (position, letter) -> 
+                        match letter with
+                        | Some letter -> Map.add position letter
+                        | None -> Map.remove position
+                        <| map
+                    )
+                    model.Letters
+            CrossWordModel { model with Letters = letters }, Cmd.none
+        | NextHintButtonPressed, CrossWordModel model ->
+            // we dont want to loose focus of the current entry
+            model.EditingWordEntryRef.Value.Focus() |> ignore
+
+            match model.CurrentWordIndex, model.HintIndex with
+            | Some wordIndex, Some index ->
+                let _, wordInfo = List.item wordIndex model.Words
+                { model with HintIndex = Some ((index + 1) % (Array.length wordInfo.Defs)) } |> CrossWordModel
+                , Cmd.none
+            | _ -> CrossWordModel model, Cmd.none
+
+    let unitSpacing = 4.0
+    let cellSide = (screen.Width - unitSpacing) / float WordGrid.gridSize - unitSpacing
+    
+    let letterCellAt letters dispatch point = 
+        View.Button(
+            text = 
+                match Map.tryFind point letters with
+                | Some letter -> Char.ToString letter
+                | None -> ""
+            , command = (fun _ -> LetterButtonPressed point |> dispatch)
+
+            , widthRequest = cellSide
+            , heightRequest = cellSide
+            
+            , padding = Thickness(0.0)
+            , borderColor = borderColor
+            , borderWidth = double 1
+            , cornerRadius = 5
+        )
+            .GridRow(fst point)
+            .GridColumn(snd point)
+ 
+    let viewGrid (model: CrossWordModel) dispatch =
         View.ContentPage(
-            View.ScrollView(
-                View.StackLayout(
-                    [
-                        yield View.Button(text = "Close", command = (fun _ -> DismissHelpPressed |> dispatch))
-                        for def in word.Defs do
-                        yield View.Label(def)
-                    ]
-                )
+            View.StackLayout(
+                [
+                    View.AbsoluteLayout(
+                        [
+                            View.Label(model.BaseWord)
+                                .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                                .LayoutBounds(Rectangle(0.5, 0.5, AbsoluteLayout.AutoSize, float primaryHeight))
+                        ]
+                        , heightRequest = float primaryHeight
+                    )
+                    View.Grid(
+                        rowdefs = List.init WordGrid.gridSize (fun _ -> "*" :> obj)
+                        , coldefs = List.init WordGrid.gridSize (fun _ -> "*" :> obj)
+                        , children = [
+                            for word in model.Words |> List.map fst do
+                            yield! word 
+                                |> WordGrid.wordAreaList 
+                                |> List.map (letterCellAt model.Letters dispatch)
+                        ]
+                        , rowSpacing = unitSpacing
+                        , columnSpacing = unitSpacing
+                        , heightRequest = screen.Width
+                    )
+                ]
             )
         )
 
-    let viewGrid (model: Model) dispatch =
-        let hidden = List.map fst model.Grid
-        let displayed = List.map snd model.Grid
+    let viewWordFocus (wordPlacement, wordInfo: DataMuseApi.Word) model dispatch =
+        let wordText = 
+            WordGrid.wordAreaList wordPlacement
+            |> List.map (fun position -> Map.tryFind position model.Letters)
+            |> List.fold (fun letters -> function 
+                | Some letter -> letter::letters
+                | None -> letters)
+                []
+            |> List.rev
+            |> List.map Char.ToString
+            |> String.concat ""
 
-        let button point = 
-            match WordGrid.at point hidden, WordGrid.at point displayed with
-            | Some correct, Some attempted -> 
-                View.Button(
-                    text = Char.ToString attempted
-                    , backgroundColor = (if correct = attempted then Color.DarkBlue else Color.Red)
-                    , padding = Thickness(0.0)
-                    , borderColor = Color.DarkGray
-                    , borderWidth = double 1
-                    , command = (fun _ -> LetterButtonPressed point |> dispatch))
-            | Some _, None -> 
-                View.Button(
-                    text = " "
-                    , padding = Thickness(0.0)
-                    , borderColor = Color.DarkGray
-                    , borderWidth = double 1
-                    , command = (fun _ -> LetterButtonPressed point |> dispatch))
-            | _ ->
-                match (WordGrid.wordAt (move Horizontal point 1) hidden, wordAt (move Vertical point 1) hidden) with
-                | Some word, _ when word.Orientation = Horizontal -> Some word
-                | _, Some word when word.Orientation = Vertical -> Some word
-                | _ -> None
-                |> function
-                    | Some word when word.Position = (move Horizontal point 1) || word.Position = (move Vertical point 1) ->
-                        View.Button(
-                            text = "?"
-                            , command = (fun _ -> DefinitionButtonPressed word |> dispatch)
-                            , padding = Thickness(0.0))
-                    | _ -> View.Label()
-
-        let gridSide = WordGrid.gridSize
-        let invisibleEntry =
-            Option.map 
-                (fun position ->
-                    let currentWord = 
-                        List.item position model.Grid |> snd
-                        |> fun word -> word.Word
-                        |> List.map Char.ToString
-                        |> String.concat ""
-                    View.Entry(
-                        text = currentWord
-                        , textChanged = (EditingWordEntryUpdated >> dispatch)
-                        , sizeChanged = (fun _ -> EditingWordEntrySizeChanged |> dispatch)
-                        , unfocused = (fun _ -> EditingWordEntryUnfocused |> dispatch)
-                        , ref = model.EditingWordEntryRef
+        View.ContentPage(
+            View.StackLayout(
+                [
+                    View.AbsoluteLayout(
+                        [
+                            (imageButton leftIcon (fun () -> CloseWordView |> dispatch))
+                                .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                                .LayoutBounds(Rectangle(0.0, 0.5, float primaryHeight, float primaryHeight))
+                            View.Label(model.BaseWord)
+                                .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                                .LayoutBounds(Rectangle(0.5, 0.5, AbsoluteLayout.AutoSize, float primaryHeight))
+                        ]
+                        , heightRequest = float primaryHeight
                     )
-                        .YConstraint(Constraint.RelativeToParent
-                            (fun parent -> 
-                                let (x, _) = List.item position model.Grid |> fst |> fun word -> 
-                                    move word.Orientation word.Position (List.length word.Word - 1)
-                                let cellSize = parent.Width / float gridSide
-                                let yOffset = cellSize * float (x - 1)
-                                yOffset
+                    
+                    View.StackLayout(
+                        [
+                            View.Label(wordInfo.Defs.[model.HintIndex.Value], horizontalOptions = LayoutOptions.FillAndExpand)
+                            View.Button(
+                                "next"
+                                , command = (fun _ -> NextHintButtonPressed |> dispatch)
+                                , verticalOptions = LayoutOptions.Center
                             )
-                        )
-                        .XConstraint(Constraint.Constant(0.0))
-                        .WidthConstraint(Constraint.Constant(100.0))
-                        .HeightConstraint(Constraint.Constant(100.0))
-                )
-                model.EditingAt
+                        ]
+                        , orientation = StackOrientation.Horizontal
+                    )
+                    View.AbsoluteLayout(
+                        gestureRecognizers = 
+                            [ View.TapGestureRecognizer(fun () -> CloseWordView |> dispatch) ]
+                        , children = [
+                            View.Entry(
+                                text = wordText
+                                , textChanged = (fun args -> 
+                                    if args.NewTextValue <> args.OldTextValue
+                                    then EditingWordEntryUpdated args.NewTextValue |> dispatch
+                                    )
+                                , sizeChanged = (fun _ -> EditingWordEntrySizeChanged |> dispatch)
+                                , ref = model.EditingWordEntryRef
+                            )
+                                .LayoutFlags(AbsoluteLayoutFlags.All)
+                                .LayoutBounds(Rectangle(0.0, 0.0, 1.0, 1.0))
 
-        View.ContentPage(
-            View.ScrollView(
-                View.StackLayout(
-                    [
-                        yield View.RelativeLayout(
-                            [
-                                match invisibleEntry with
-                                | Some entry -> yield entry
-                                | None -> ()
+                            View.BoxView(Color.White)
+                                .LayoutFlags(AbsoluteLayoutFlags.All)
+                                .LayoutBounds(Rectangle(0.0, 0.0, 1.0, 1.0))
 
-                                yield View.Grid(
-                                    rowdefs = [ for _ in 1..gridSide do yield "*" ]
-                                    , coldefs = [ for _ in 1..gridSide do yield "*" ]
-                                    , children = [
-                                        for x in 1..gridSide do
-                                        for y in 1..gridSide do
-                                        yield (button (x,y))
-                                            .GridRow(x).GridColumn(y)
-                                    ]
-                                    , rowSpacing = 2.0
-                                    , columnSpacing = 2.0
-                                    , backgroundColor = Color.Blue
-                                )
-                                    .WidthConstraint(Constraint.RelativeToParent(fun parent -> parent.Width))
-                                    .HeightConstraint(Constraint.RelativeToParent(fun parent -> parent.Width))
-                            ]
-                        )
-                    ]
-                    , verticalOptions = LayoutOptions.Start
-                )
+                            View.StackLayout(
+                                wordPlacement 
+                                    |> WordGrid.wordAreaList 
+                                    |> List.map (letterCellAt model.Letters dispatch)
+                                , orientation = StackOrientation.Horizontal
+                                , spacing = 4.0
+                            )
+                                .LayoutFlags(AbsoluteLayoutFlags.PositionProportional 
+                                    ||| AbsoluteLayoutFlags.HeightProportional)
+                                .LayoutBounds(Rectangle(0.5, 0.5, AbsoluteLayout.AutoSize, 1.0))
+                        ]
+                    )
+                ]
             )
         )
 
-    let view = function
-        | { WordHelp = Some help } -> viewHelp help
-        | model -> viewGrid model
+    let view model dispatch =
+        match model with
+        | BaselineRhymeWordModel model -> 
+            View.ContentPage(
+                View.StackLayout(
+                    [
+                        yield View.Label(
+                            "Enter the baseline for your"
+                            , horizontalOptions = LayoutOptions.Center
+                        )
+                        yield View.Entry(
+                            model
+                            , placeholder = "rhyme"
+                            , textColor = primaryButtonColor
+                            , textChanged = (fun args -> 
+                                if args.NewTextValue <> args.OldTextValue 
+                                then args.NewTextValue |> BaselineRhymeUpdated |> dispatch
+                            )
+                            , horizontalOptions = LayoutOptions.CenterAndExpand
+                        )
+
+                        if model = "" then
+                            yield View.Label(
+                                "no pressure tho"
+                                , horizontalOptions = LayoutOptions.Center
+                            )
+                            yield View.Label(
+                                "take your time"
+                                , horizontalOptions = LayoutOptions.Center
+                            )
+
+                        yield View.Button(
+                            "Generate puzzle"
+                            , command = (fun _ -> BaselineRhymeSelected |> dispatch)
+                            , heightRequest = double primaryHeight
+                            , cornerRadius = primaryHeight / 2
+                            , borderWidth = 1.0
+                            , backgroundColor = focusColor
+                        )
+                    ]
+                )
+            )
+        | LoadingCrosswordModel word ->
+            View.ContentPage(
+                View.AbsoluteLayout(
+                    [
+                        View.Label(
+                            "Snoopa loompas assemblying rhymes"
+                        )
+                            .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                            .LayoutBounds(Rectangle(0.5, 0.05, AbsoluteLayout.AutoSize, AbsoluteLayout.AutoSize))
+
+                        View.Label(
+                            word
+                            , textColor = primaryButtonColor
+                        )
+                            .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                            .LayoutBounds(Rectangle(0.5, 0.25, AbsoluteLayout.AutoSize, AbsoluteLayout.AutoSize))
+
+                        View.Image(
+                            snoopaLoompa
+                            , created = (fun _ -> SnoopaLoompaImageCreated |> dispatch)
+                            , ref = snoopaLoompaImageRef
+                        )
+                            .LayoutFlags(AbsoluteLayoutFlags.All)
+                            .LayoutBounds(Rectangle(0.5, 0.5, 0.5, 0.5))
+                    ]
+                )
+            )
+        | CrossWordModel model ->
+            match model with 
+            | { CurrentWordIndex = Some index } ->
+                let word = List.item index model.Words
+                viewWordFocus word model dispatch
+            | model -> 
+                viewGrid model dispatch
 
     // Note, this declaration is needed if you enable LiveUpdate
     let program = Program.mkProgram init update view
