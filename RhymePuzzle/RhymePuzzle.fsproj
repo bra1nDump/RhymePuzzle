@@ -18,6 +18,9 @@
     <EmbeddedResource Include="leftIcon.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </EmbeddedResource>
+    <EmbeddedResource Include="checkmarkIcon.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </EmbeddedResource>
     <Compile Include="Prelude.fs" />
     <Compile Include="DataMuseApi.fs" />
     <Compile Include="CrossWord.fs" />

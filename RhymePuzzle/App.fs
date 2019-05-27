@@ -32,6 +32,7 @@ module Theme =
     let leftIcon = png "leftIcon"
     let rightIcon = png "rightIcon"
     let closeIcon = png "closeIcon"
+    let checkmarkIcon = png "checkmarkIcon"
 
     let screen = Device.Info.ScaledScreenSize
 
@@ -56,6 +57,7 @@ module App =
 
             CurrentWordIndex: int option
             HintIndex: int option
+            WordText: string option
 
             EditingWordEntryRef: ViewRef<Entry>
         }
@@ -75,9 +77,11 @@ module App =
         | LetterButtonPressed of (int * int)
 
         | NextHintButtonPressed
-        | EditingWordEntryUpdated of string
+        | EditingWordEntryUpdated of TextChangedEventArgs
         | EditingWordEntrySizeChanged
         | CloseWordView
+
+        | HomeButtonPressed
 
     let init () = BaselineRhymeWordModel "", Cmd.none
 
@@ -89,11 +93,23 @@ module App =
 
             CurrentWordIndex = None
             HintIndex = None
+            WordText = None
 
             EditingWordEntryRef = ViewRef<Entry>()
         }
 
     let snoopaLoompaImageRef = ViewRef<Image>()
+
+    
+    let rec collectWhileSome = function
+        | [] -> []
+        | None::_ -> []
+        | (Some x)::rest -> x::collectWhileSome rest
+
+    let rec collectSome = function
+        | [] -> []
+        | None::rest -> collectSome rest
+        | (Some x)::rest -> x::collectSome rest
 
     let update msg model =
         match msg, model with
@@ -150,7 +166,17 @@ module App =
             let wordClicked = (wordAt coordinate hiddenWords).Value
             let wordIndex = List.findIndex (fun x -> x = wordClicked) hiddenWords
             
-            { model with CurrentWordIndex = Some wordIndex; HintIndex = Some 0 } |> CrossWordModel
+            let wordText = 
+                WordGrid.wordAreaList wordClicked
+                |> List.map (fun position -> Map.tryFind position model.Letters)
+                |> collectWhileSome
+                |> List.map Char.ToString
+                |> String.concat ""
+            { model with 
+                CurrentWordIndex = Some wordIndex
+                HintIndex = Some 0
+                WordText = Some wordText
+            } |> CrossWordModel
             , Cmd.none
         | EditingWordEntrySizeChanged, CrossWordModel model ->
             Option.iter 
@@ -166,34 +192,36 @@ module App =
         | CloseWordView, CrossWordModel model ->
             { model with CurrentWordIndex = None; HintIndex = None } |> CrossWordModel
             , Cmd.none
-        | EditingWordEntryUpdated text, CrossWordModel model  ->
+        | EditingWordEntryUpdated args, CrossWordModel model  ->
             let word = List.item model.CurrentWordIndex.Value model.Words |> fst
             let area = WordGrid.wordAreaList word
 
+            if args.OldTextValue.Length > args.NewTextValue.Length then 
+                let deletedLetterAt = List.item args.NewTextValue.Length area
+                { model with
+                    Letters = Map.remove deletedLetterAt model.Letters
+                } |> CrossWordModel
+                , Cmd.none
+            else
+
+            let text = args.NewTextValue
             let wordLength = List.length word.Word
             let wordEntered =
                 text
                 |> String.toList
                 |> List.takeMax wordLength
-                |> List.map Some
 
             model.EditingWordEntryRef.Value.Text 
                 <- text.Substring(0, wordEntered.Length)
-                
-            let wordEntered = 
-                wordEntered 
-                @ List.init (wordLength - wordEntered.Length) (fun _ -> None)
-
-            let letters = 
-                List.zip area wordEntered
-                |> List.fold (fun map (position, letter) -> 
-                        match letter with
-                        | Some letter -> Map.add position letter
-                        | None -> Map.remove position
-                        <| map
-                    )
-                    model.Letters
-            CrossWordModel { model with Letters = letters }, Cmd.none
+               
+            { model with 
+                Letters =
+                    List.zip area wordEntered
+                    |> Map.ofList
+                    |> Map.merge model.Letters
+                WordText = Some text
+            } |> CrossWordModel
+            , Cmd.none
         | NextHintButtonPressed, CrossWordModel model ->
             // we dont want to loose focus of the current entry
             model.EditingWordEntryRef.Value.Focus() |> ignore
@@ -201,9 +229,13 @@ module App =
             match model.CurrentWordIndex, model.HintIndex with
             | Some wordIndex, Some index ->
                 let _, wordInfo = List.item wordIndex model.Words
-                { model with HintIndex = Some ((index + 1) % (Array.length wordInfo.Defs)) } |> CrossWordModel
+                { model with 
+                    HintIndex = Some ((index + 1) % (Array.length wordInfo.Defs)) 
+                } |> CrossWordModel
                 , Cmd.none
             | _ -> CrossWordModel model, Cmd.none
+        | HomeButtonPressed, _ ->
+            BaselineRhymeWordModel "", Cmd.none
 
     let unitSpacing = 4.0
     let cellSide = (screen.Width - unitSpacing) / float WordGrid.gridSize - unitSpacing
@@ -228,11 +260,33 @@ module App =
             .GridColumn(snd point)
  
     let viewGrid (model: CrossWordModel) dispatch =
+        let validationStatus placedWord =
+            let { Orientation = orientation; Position = position; Word = word } = placedWord
+            let row, column = move orientation position -1
+            let wordText = 
+                WordGrid.wordAreaList placedWord
+                |> List.map (fun position -> Map.tryFind position model.Letters)
+                |> collectWhileSome
+                
+            View.AbsoluteLayout(
+                [
+                    View.Image(if wordText = word then checkmarkIcon else closeIcon)
+                        .LayoutFlags(AbsoluteLayoutFlags.All)
+                        .LayoutBounds(Rectangle(0.5, 0.5, 0.5, 0.5))
+                ]
+            )
+                .GridRow(row)
+                .GridColumn(column)
+
         View.ContentPage(
             View.StackLayout(
                 [
                     View.AbsoluteLayout(
                         [
+                            (imageButton leftIcon (fun () -> HomeButtonPressed |> dispatch))
+                                .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                                .LayoutBounds(Rectangle(0.0, 0.5, float primaryHeight, float primaryHeight))
+
                             View.Label(model.BaseWord)
                                 .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
                                 .LayoutBounds(Rectangle(0.5, 0.5, AbsoluteLayout.AutoSize, float primaryHeight))
@@ -244,6 +298,7 @@ module App =
                         , coldefs = List.init WordGrid.gridSize (fun _ -> "*" :> obj)
                         , children = [
                             for word in model.Words |> List.map fst do
+                            yield validationStatus word
                             yield! word 
                                 |> WordGrid.wordAreaList 
                                 |> List.map (letterCellAt model.Letters dispatch)
@@ -257,30 +312,24 @@ module App =
         )
 
     let viewWordFocus (wordPlacement, wordInfo: DataMuseApi.Word) model dispatch =
-        let wordText = 
-            WordGrid.wordAreaList wordPlacement
-            |> List.map (fun position -> Map.tryFind position model.Letters)
-            |> List.fold (fun letters -> function 
-                | Some letter -> letter::letters
-                | None -> letters)
-                []
-            |> List.rev
-            |> List.map Char.ToString
-            |> String.concat ""
-
         View.ContentPage(
             View.StackLayout(
                 [
                     View.AbsoluteLayout(
                         [
-                            (imageButton leftIcon (fun () -> CloseWordView |> dispatch))
-                                .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
-                                .LayoutBounds(Rectangle(0.0, 0.5, float primaryHeight, float primaryHeight))
-                            View.Label(model.BaseWord)
+                            View.Label(
+                                model.BaseWord
+                                , fontSize = 20
+                            )
                                 .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
                                 .LayoutBounds(Rectangle(0.5, 0.5, AbsoluteLayout.AutoSize, float primaryHeight))
+
+                            (imageButton closeIcon (fun () -> CloseWordView |> dispatch))
+                                .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
+                                .LayoutBounds(Rectangle(1.0, 0.5, float primaryHeight, float primaryHeight))
                         ]
                         , heightRequest = float primaryHeight
+                        , backgroundColor = Color.DimGray
                     )
                     
                     View.StackLayout(
@@ -299,11 +348,8 @@ module App =
                             [ View.TapGestureRecognizer(fun () -> CloseWordView |> dispatch) ]
                         , children = [
                             View.Entry(
-                                text = wordText
-                                , textChanged = (fun args -> 
-                                    if args.NewTextValue <> args.OldTextValue
-                                    then EditingWordEntryUpdated args.NewTextValue |> dispatch
-                                    )
+                                text = model.WordText.Value
+                                , textChanged = (EditingWordEntryUpdated >> dispatch)
                                 , sizeChanged = (fun _ -> EditingWordEntrySizeChanged |> dispatch)
                                 , ref = model.EditingWordEntryRef
                             )
@@ -385,6 +431,7 @@ module App =
                         View.Label(
                             word
                             , textColor = primaryButtonColor
+                            , fontSize = 20
                         )
                             .LayoutFlags(AbsoluteLayoutFlags.PositionProportional)
                             .LayoutBounds(Rectangle(0.5, 0.25, AbsoluteLayout.AutoSize, AbsoluteLayout.AutoSize))
@@ -395,7 +442,7 @@ module App =
                             , ref = snoopaLoompaImageRef
                         )
                             .LayoutFlags(AbsoluteLayoutFlags.All)
-                            .LayoutBounds(Rectangle(0.5, 0.5, 0.5, 0.5))
+                            .LayoutBounds(Rectangle(0.7, 0.5, 0.7, 0.7))
                     ]
                 )
             )

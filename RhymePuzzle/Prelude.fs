@@ -66,9 +66,18 @@ module List =
         then xs
         else List.take k xs
 
+    let rec zip xs ys =
+        match xs, ys with 
+        | x::xs, y::ys -> (x, y)::zip xs ys
+        | _ -> []
+
     let rec zipWithNone xs ys =
         match xs, ys with
         | x::xs, y::ys -> (Some x, Some y)::zipWithNone xs ys
         | x::xs, [] -> (Some x, None)::zipWithNone xs []
         | [], y::ys -> (None, Some y)::zipWithNone [] ys
         | _ -> []
+
+[<AutoOpen>]
+module Map =
+    let merge oldMap updates = Map.foldBack Map.add updates oldMap
